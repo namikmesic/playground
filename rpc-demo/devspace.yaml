@@ -1,0 +1,102 @@
+version: v2beta1
+name: playgroundgit
+
+pipelines:
+  dev:
+    run: |-
+      run_dependencies --all       # 1. Deploy any projects this project needs (see "dependencies")
+      ensure_pull_secrets --all    # 2. Ensure pull secrets
+      create_deployments --all     # 3. Deploy Helm charts and manifests specfied as "deployments"
+      start_dev --all               # 4. Start dev mode "app" (see "dev" section)
+  deploy:
+    run: |-
+      run_dependencies --all                            # 1. Deploy any projects this project needs (see "dependencies")
+      ensure_pull_secrets --all                         # 2. Ensure pull secrets
+      build_images --all -t $(git describe --always)    # 3. Build, tag (git commit hash) and push all images (see "images")
+      create_deployments --all                          # 4. Deploy Helm charts and manifests specfied as "deployments"
+
+images:
+  grpc-server:
+    image: grpc-server:latest
+    dockerfile: ./Dockerfile
+    context: .
+    buildArgs:
+      GO_VERSION: "1.23"
+      APP_PATH: server
+  grpc-client:
+    image: grpc-client:latest
+    dockerfile: ./Dockerfile
+    context: ./
+    buildArgs:
+      GO_VERSION: "1.23"
+      APP_PATH: client
+deployments:
+  grpc-server:
+    kubectl:
+      manifests:
+        - ./grpc-server/kustomize
+      kustomize: true
+  grpc-client:
+    kubectl:
+      manifests:
+        - ./grpc-client/kustomize
+      kustomize: true
+  chaos-mesh:
+    helm:
+      chart:
+        name: chaos-mesh
+        repo: https://charts.chaos-mesh.org
+        version: 2.7.0
+      values:
+        dashboard:
+          securityMode: false
+          resources:
+            requests:
+              cpu: 250m
+              memory: 256Mi
+        clusterScoped: true
+        chaosDaemon:
+          resources:
+            requests:
+              cpu: 1
+              memory: 1Gi
+        controllerManager:
+          leaderElection:
+            enabled: false
+          resources:
+            requests:
+              cpu: 250m
+              memory: 256Mi
+dev:
+  grpc-server:
+    logs:
+      enabled: true
+    patches:
+    - op: remove
+      path: spec.securityContext
+    imageSelector: grpc-server:latest
+    devImage: cosmtrek/air
+    workingDir: /app/grpc-server
+    command: ["/go/bin/air"]
+    sync:
+      - path: ./:/app
+        startContainer: true
+    ports:
+      - port: "50052"
+  grpc-client:
+    logs:
+      enabled: true
+    imageSelector: grpc-client:latest
+    devImage: cosmtrek/air
+    workingDir: /app/grpc-client
+    command: ["/go/bin/air"]
+    sync:
+      - path: ./:/app
+        startContainer: true
+  chaos-mesh:
+    logs:
+      enabled: true
+    labelSelector:
+      app.kubernetes.io/component: chaos-dashboard
+    ports:
+      - port: "2333"

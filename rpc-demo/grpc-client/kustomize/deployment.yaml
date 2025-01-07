@@ -1,0 +1,23 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: client
+  labels:
+    app: client
+spec:
+  replicas: 3
+  selector:
+    matchLabels:
+      app: client
+  template:
+    metadata:
+      labels:
+        app: client
+    spec:
+      containers:
+      - name: grpc-client
+        image: grpc-client:latest
+        command: ["./client"]
+        env:
+        - name: GRPC_SERVER_ADDR
+          value: "server:50052"
